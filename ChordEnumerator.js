@@ -27,7 +27,7 @@ var PluginParameters = [
         name: "Log Empty Bars",
         type: "menu",
         valueStrings: ["No", "Yes"],
-        defaultValue: 0
+        defaultValue: 1
     },
     {
         name: "Include Notes List",
