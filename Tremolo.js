@@ -18,11 +18,16 @@ const __PARAMS__ = [
   , "High-pass (Hz)"
   , "Low-pass (Hz)"
   , "Delay (beats)"
+  , "Sync AHDSR"
   , "Attack"
   , "Hold"
   , "Decay"
   , "Sustain"
   , "Release"
+  , "Attack (free)"
+  , "Hold (free)"
+  , "Decay (free)"
+  , "Release (free)"
   , "Voices"
 ];
 
@@ -69,12 +74,17 @@ var PARAM_INDEX = {
   HIGHPASS_HZ: 7,
   LOWPASS_HZ: 8,
   DELAY: 9,
-  ATTACK: 10,
-  HOLD: 11,
-  ENV_DECAY: 12,
-  SUSTAIN: 13,
-  RELEASE: 14,
-  VOICES: 15
+  SYNC_AHDSR: 10,
+  ATTACK: 11,
+  HOLD: 12,
+  ENV_DECAY: 13,
+  SUSTAIN: 14,
+  RELEASE: 15,
+  ATTACK_FREE: 16,
+  HOLD_FREE: 17,
+  ENV_DECAY_FREE: 18,
+  RELEASE_FREE: 19,
+  VOICES: 20
 };
 
 // ---------------------
@@ -157,6 +167,11 @@ var PluginParameters = [
     numberOfSteps: 1000, // Make this divisible by three for a smoother effect.
     defaultValue: 0.083 // 1/12th
   }, {
+    name: __PARAMS__[PARAM_INDEX.SYNC_AHDSR],
+    type: "menu",
+    valueStrings: ["Off", "On"],
+    defaultValue: 1
+  }, {
     name: __PARAMS__[PARAM_INDEX.ATTACK],
     type: "menu",
     valueStrings: SYNC_DURATIONS.map(function (p) { return p[0]; }),
@@ -183,6 +198,34 @@ var PluginParameters = [
     type: "menu",
     valueStrings: SYNC_DURATIONS.map(function (p) { return p[0]; }),
     defaultValue: 10 // 1/4
+  }, {
+    name: __PARAMS__[PARAM_INDEX.ATTACK_FREE],
+    type: "lin",
+    minValue: 0,
+    maxValue: 1,
+    numberOfSteps: 1000,
+    defaultValue: 0
+  }, {
+    name: __PARAMS__[PARAM_INDEX.HOLD_FREE],
+    type: "lin",
+    minValue: 0,
+    maxValue: 1,
+    numberOfSteps: 1000,
+    defaultValue: 0
+  }, {
+    name: __PARAMS__[PARAM_INDEX.ENV_DECAY_FREE],
+    type: "lin",
+    minValue: 0,
+    maxValue: 1,
+    numberOfSteps: 1000,
+    defaultValue: 0.5
+  }, {
+    name: __PARAMS__[PARAM_INDEX.RELEASE_FREE],
+    type: "lin",
+    minValue: 0,
+    maxValue: 1,
+    numberOfSteps: 1000,
+    defaultValue: 0.5
   }, {
     name: __PARAMS__[PARAM_INDEX.VOICES],
     type: "lin",
@@ -298,11 +341,12 @@ function createTailRepeats(srcNoteOn, lengthBeats, releaseBeat) {
   var hpHz = param(PARAM_INDEX.HIGHPASS_HZ);
   var lpHz = param(PARAM_INDEX.LOWPASS_HZ);
   var delayBeats = param(PARAM_INDEX.DELAY);
-  var envA = envDurationFromMenu(PARAM_INDEX.ATTACK);
-  var envH = envDurationFromMenu(PARAM_INDEX.HOLD);
-  var envD = envDurationFromMenu(PARAM_INDEX.ENV_DECAY);
+  var syncEnv = param(PARAM_INDEX.SYNC_AHDSR) >= 0.5;
+  var envA = envDuration(syncEnv, PARAM_INDEX.ATTACK, PARAM_INDEX.ATTACK_FREE);
+  var envH = envDuration(syncEnv, PARAM_INDEX.HOLD, PARAM_INDEX.HOLD_FREE);
+  var envD = envDuration(syncEnv, PARAM_INDEX.ENV_DECAY, PARAM_INDEX.ENV_DECAY_FREE);
   var envS = param(PARAM_INDEX.SUSTAIN);
-  var envR = envDurationFromMenu(PARAM_INDEX.RELEASE);
+  var envR = envDuration(syncEnv, PARAM_INDEX.RELEASE, PARAM_INDEX.RELEASE_FREE);
   var voices = Math.max(1, Math.round(param(PARAM_INDEX.VOICES)));
 
   // keep bounds sane
@@ -358,6 +402,19 @@ function envDurationFromMenu(idx) {
   var selection = Math.round(param(idx));
   var safeIdx = clamp(selection, 0, SYNC_DURATIONS.length - 1);
   return SYNC_DURATIONS[safeIdx][1];
+}
+
+function envDuration(syncOn, menuIdx, freeIdx) {
+  return syncOn ? envDurationFromMenu(menuIdx) : envDurationFromFree(freeIdx);
+}
+
+function envDurationFromFree(idx) {
+  // Exponential mapping from 0..1 slider to beats.
+  // 0 -> very snappy (~1/100 beat), 1 -> long (~8 beats).
+  var v = clamp(param(idx), 0, 1);
+  var minBeats = 0.01;
+  var maxBeats = 8;
+  return minBeats * Math.pow(maxBeats / minBeats, v);
 }
 
 function midiPitchToHz(pitch) {
