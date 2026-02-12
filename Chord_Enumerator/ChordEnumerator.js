@@ -184,9 +184,14 @@ function chordNameFromLowestRoot(pitches) {
 }
 
 // ---- Measure accumulation ----
-var currentBar = null;
-var barPitches = [];     // pitches seen in this bar (note-on)
+// Bar-tracking state
+var currentBarNumber = null;     // 1-based bar index we are collecting
+var barPitches = [];             // pitches seen in this bar (note-on)
 var lastPlayed = false;
+var currentMeterNum = 4;
+var currentMeterDen = 4;
+var currentBeatsPerBar = 4;
+var barStartBeat = 0;            // absolute beat position (in quarter notes) of current bar start
 
 function flushBar(barNumber) {
     var logEmpty = (GetParameter("Log Empty Bars") === 1);
@@ -222,36 +227,44 @@ function ProcessMIDI() {
 
     // reset on stop/start
     if (!t.playing && lastPlayed) {
-        currentBar = null;
+        currentBarNumber = null;
         barPitches = [];
     }
     lastPlayed = t.playing;
 
     if (!t.playing) return;
 
-    // Logic reports bar position as 1-based in many contexts; here we derive it
-    // from blockStartBeat and meter. We'll compute a stable bar index using
-    // current time signature.
     var num = t.meterNumerator || 4;
     var den = t.meterDenominator || 4;
+    var beatsPerBar = num * (4 / den); // quarter-note units
 
-    // "Beats" in TimingInfo are quarter-note beats.
-    // Beats per bar in quarter-note units:
-    var beatsPerBar = num * (4 / den);
-
-    // barIndex 0-based
-    var barIndex = Math.floor(t.blockStartBeat / beatsPerBar);
-
-    if (currentBar === null) {
-        currentBar = barIndex;
+    // First-time init (supports starting playback mid-song)
+    if (currentBarNumber === null) {
+        currentMeterNum = num;
+        currentMeterDen = den;
+        currentBeatsPerBar = beatsPerBar;
+        currentBarNumber = Math.floor(t.blockStartBeat / beatsPerBar) + 1;
+        barStartBeat = (currentBarNumber - 1) * beatsPerBar;
     }
 
-    if (barIndex !== currentBar) {
-        // One or more bars advanced; flush each.
-        while (currentBar < barIndex) {
-            flushBar(currentBar + 1); // log bar as 1-based
-            currentBar++;
-            barPitches = [];
-        }
+    // Detect meter change; start a fresh bar at the change boundary to avoid mis-counting.
+    if (num !== currentMeterNum || den !== currentMeterDen) {
+        flushBar(currentBarNumber);
+        currentBarNumber++;
+        barPitches = [];
+        currentMeterNum = num;
+        currentMeterDen = den;
+        currentBeatsPerBar = beatsPerBar;
+        barStartBeat = t.blockStartBeat;
+    }
+
+    // Advance bars while the playhead has crossed bar boundaries.
+    var beatsIntoBar = t.blockStartBeat - barStartBeat;
+    while (beatsIntoBar >= currentBeatsPerBar) {
+        flushBar(currentBarNumber);
+        currentBarNumber++;
+        barPitches = [];
+        barStartBeat += currentBeatsPerBar;
+        beatsIntoBar = t.blockStartBeat - barStartBeat;
     }
 }
